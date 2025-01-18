@@ -8,6 +8,7 @@ if len(sys.argv)<3:
 
 dest = (sys.argv[1],int(sys.argv[2]))
 host = ('127.0.0.1',12345)
+print(dest)
 PACKET_SIZE = 1024
 
 def endpoint_recv(conn: socket.socket, endpoint: socket.socket):
