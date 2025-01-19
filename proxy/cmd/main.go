@@ -8,23 +8,33 @@ import (
 	"log"
 	"math/rand/v2"
 	"net"
-	"strings"
 	"sync"
+	"time"
 )
 
-var ports sync.Map
-var servers sync.Map
-
-const PORT_LOW = 49152
-const PORT_HIGH = 65535
-const PORT_RANGE = PORT_HIGH - PORT_LOW
 const WORD_LEN = 100
 const IP_SIZE = 27 // aaa.bbb.ccc.minics.dev:XXXX
-const PACKET_SIZE = 1024
+const MIDDLE_IP = "127.0.0.1:25565"
+const CREATE_BYTES uint8 = 201
 
 // required becuase minecraft sends 5 extra bytes which I don't know that they are
 // so we must skip past that to read the domain name
-const MINECRAFT_DOMAIN_OFFSET = 5
+const INITAL_PACKET_OFFSET = 5
+const PACKET_SIZE = 1024
+const TIMEOUT_INTIAL = 30 * time.Second
+const TIMEOUT_WRITE = 30 * time.Second
+
+const FLAG_CREATE = 100
+const FLAG_SUCCESS = 101
+const FLAG_FAIL = 102
+
+const RETRY_IP_GENERATE_CAP = 20
+
+var servers sync.Map
+
+type Server struct {
+	IP string
+}
 
 var words = []string{
 	"ace", "act", "add", "ado", "aft", "age", "ago", "aid", "air", "ale",
@@ -36,140 +46,140 @@ var words = []string{
 	"con", "coo", "cop", "cot", "cow", "coy", "cry", "cub", "cue", "cup",
 	"cur", "cut", "dab", "dad", "dam", "day", "den", "dew", "did", "die",
 	"dig", "dim", "din", "dip", "dot", "dry", "dub", "dug", "due", "dye",
-	"ear", "eat", "egg", "ego", "elf", "end", "era", "eve", "eye",
+	"ear", "eat", "egg", "ego", "elf", "end", "era", "eve", "eye", "nnn",
 }
 
-type Server struct {
-	Host net.Conn
-	Port int
-}
+func generateRandomIp(hostIp string) (string, bool) {
+	for range RETRY_IP_GENERATE_CAP {
+		i, j, k := rand.IntN(WORD_LEN), rand.IntN(WORD_LEN), rand.IntN(WORD_LEN)
+		ip := fmt.Sprintf("%v.%v.%v.minics.dev", words[i], words[j], words[k])
 
-func InitializerListen() {
-	tcp, err := net.Listen("tcp", "127.0.0.1:3000")
-	if err != nil {
-		log.Fatalf("Failed creating Initializer Listener on port 3000 | %v", err)
+		if _, loaded := servers.LoadOrStore(ip, hostIp); !loaded {
+			return ip, true
+		}
 	}
-	defer tcp.Close()
 
-	log.Println("listening on port 3000")
+	return "", false
+}
 
-	for {
-		conn, err := tcp.Accept()
+func BeginExchange(client net.Conn, dest net.Conn, serverGenerateIp string) {
+	defer client.Close()
+	defer dest.Close()
+
+	clientIp := client.RemoteAddr().String()
+	destIp := client.RemoteAddr().String()
+
+	log.Println("beginning to exchange between", clientIp, destIp, serverGenerateIp)
+
+	go func() {
+		_, err := io.Copy(dest, client)
 		if err != nil {
-			log.Println("failed to accept incoming connection", err)
-			continue
+			log.Println("connetion failed between client to dest", err)
 		}
+	}()
 
-		go InitializerHandleConnection(conn)
+	_, err := io.Copy(client, dest)
+	if err != nil {
+		log.Println("connection failed between dest to client", err)
 	}
 }
 
-func InitializerHandleConnection(conn net.Conn) {
-	for {
-		newIP := generateRandomIp()
-		if _, loaded := servers.LoadOrStore(newIP, conn); !loaded {
-			fmt.Println("created ip", newIP)
-			conn.Write([]byte(newIP))
-			break
-		}
-	}
-}
-
-func generateRandomIp() string {
-	i, j, k := rand.IntN(WORD_LEN), rand.IntN(WORD_LEN), rand.IntN(WORD_LEN)
-	return fmt.Sprintf("%v.%v.%v.minics.dev", words[i], words[j], words[k])
-}
-
-func TunnelHandleConnection(conn net.Conn) {
-	defer conn.Close()
-
+func RouteClient(client net.Conn) {
+	clientIp := client.RemoteAddr().String()
 	buf := make([]byte, PACKET_SIZE)
-	size, err := conn.Read(buf)
-	if err != nil || size == 0 {
-		log.Println(conn.RemoteAddr().String(), "conn died")
-	}
 
-	connIP := strings.TrimSpace(string(buf[MINECRAFT_DOMAIN_OFFSET:IP_SIZE]))
-	fmt.Println(connIP, []byte(connIP))
-
-	val, ok := servers.Load(connIP)
-	if !ok {
-		log.Println("cannot find ip")
+	log.Println("routing client", clientIp)
+	n, err := client.Read(buf)
+	if err != nil || n == 0 {
+		log.Println("client failed to accept incoming packet", err)
+		client.Close()
 		return
 	}
 
-	host, ok := val.(net.Conn)
-	if !ok {
-		log.Println("failed to translate type out of server map")
+	// log.Println(buf, n, clientIp)
+
+	// if a client is attempting to connect to a server
+	// not create one
+	if n >= IP_SIZE {
+		requestedIP := string(buf[5:IP_SIZE])
+		log.Println("connection for ", requestedIP, "from", clientIp)
+
+		ipVal, ok := servers.Load(requestedIP)
+		if !ok {
+			log.Println("request ip does not exists", requestedIP, clientIp)
+			client.Close()
+			return
+		}
+
+		ip, ok := ipVal.(string)
+		if !ok {
+			log.Println("WARNING FAILED TO TRANSLATE IP, INTENRAL ISSUE")
+			client.Close()
+			return
+		}
+
+		log.Println(clientIp, "found", ip, requestedIP)
+
+		dest, err := net.DialTimeout("tcp", ip, TIMEOUT_INTIAL)
+		if err != nil {
+			log.Println("connection for ", requestedIP, "from", clientIp, "failed")
+			client.Close()
+			return
+		}
+
+		_, err = dest.Write(buf[:n])
+		if err != nil {
+			log.Println("failed to write packet back to dest", requestedIP, clientIp)
+			dest.Close()
+			client.Close()
+			return
+		}
+
+		go BeginExchange(client, dest, requestedIP)
 		return
 	}
 
-	// send the packet we caught and anaylzed to the server
-	host.Write(buf[:size])
-	go TunnelHostBack(connIP, conn, host)
-    
-    fmt.Println("starting to listen for our packets")
-	for {
-		n, err := conn.Read(buf)
-		if err != nil {
-			log.Println("connection done")
-			break
-		}
-
-		_, err = host.Write(buf[:n])
-		if err != nil {
-			if err == io.EOF {
-				servers.Delete(connIP)
-				log.Println("host done")
-			}
-
-			log.Println("host closed")
-			break
-		}
+	// invalid case
+	if n != 1 {
+		log.Println("invalid packet size, below min for ip and not one byte for creation flag", clientIp, n)
+		client.Close()
+		return
 	}
-}
 
-func TunnelHostBack(ip string, conn net.Conn, host net.Conn) {
-	buf := make([]byte, PACKET_SIZE)
-
-	for {
-		n, err := host.Read(buf)
-		if err != nil {
-			if err == io.EOF || n == 0 {
-				servers.Delete(ip)
-				log.Println("host done")
-			}
-			log.Println("connection done")
-			break
-		}
-
-		_, err = conn.Write(buf[:n])
-		if err != nil {
-			break
-		}
+	if buf[0] != FLAG_CREATE {
+		log.Println("invalid byte code", clientIp, buf[0])
+		client.Write([]byte("invalid code"))
+		client.Close()
+		return
 	}
-}
 
-func TunnelListen() {
-	tcp, err := net.Listen("tcp", "127.0.0.1:3001")
-	if err != nil {
-		log.Fatalf("failed to create tunneler on 3001 | %v", err)
+	log.Println("creating server for", clientIp)
+	ip, success := generateRandomIp(clientIp + "25566")
+	if !success {
+		client.Write([]byte{FLAG_FAIL})
+	} else {
+		msg := []byte("ip created: " + ip)
+		client.Write(append([]byte{FLAG_SUCCESS}, msg...))
 	}
-	defer tcp.Close()
 
-	for {
-		conn, err := tcp.Accept()
-		if err != nil {
-			log.Println("failed to accept incoming conncetion to middle man", err)
-			continue
-		}
-
-		go TunnelHandleConnection(conn)
-	}
+	client.Close()
 }
 
 func main() {
-	fmt.Println("Hello World!")
-	go InitializerListen()
-	TunnelListen()
+	log.Println("hello from middleman")
+	middleman, err := net.Listen("tcp", MIDDLE_IP)
+	if err != nil {
+		panic(err)
+	}
+	defer middleman.Close()
+
+	for {
+		client, err := middleman.Accept()
+		if err != nil {
+			log.Println("client failed to connect", err)
+			continue
+		}
+
+		go RouteClient(client)
+	}
 }
