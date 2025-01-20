@@ -6,25 +6,29 @@ const (
 	IP_GENERATE_CAP = 20
 
 	// size of standard data
-	PACKET_SIZE_DATA = 1024
+	// size of responses from servers (exlcudes header information)
+	PACKET_SIZE_RAW = 2048
 
 	// size for our id
-	PACKET_SIZE_ID = 4 
+	PACKET_SIZE_ID = 4
 
 	//size for our flag
 	PACKET_SIZE_FLAG = 1
+	PACKET_SIZE_HEADER_OFFSET = PACKET_SIZE_FLAG + PACKET_SIZE_ID
 
 	// total size with layout
-	PACKET_SIZE = PACKET_SIZE_FLAG + PACKET_SIZE_ID + PACKET_SIZE_DATA
+	PACKET_SIZE_SIGNED = PACKET_SIZE_HEADER_OFFSET+ PACKET_SIZE_RAW
 
 	// these  are 1 bytes flags 0-255
 	FLAG_CREATE                uint8 = 100
 	FLAG_SUCCESS               uint8 = 101
 	FLAG_FAIL                  uint8 = 102
 	FLAG_POLL                  uint8 = 103 // polls connection (disregard for loader)
-	FLAG_CONNECTION_DISCONNECT uint8 = 104
-	FLAG_DATA                  uint8 = 105
-	FLAG_CONNECTION_NEW        uint8 = 106
+	FLAG_DATA                  uint8 = 104
+	FLAG_CONNECTION_DISCONNECT uint8 = 105
+	FLAG_CONNECTION_INCOMING   uint8 = 106
+	FLAG_CONNECTION_ACCEPTED   uint8 = 107
+	FLAG_CONNECTION_FAILED     uint8 = 108
 
 	LOADER_CREATE_PACKET_SIZE = 1
 )

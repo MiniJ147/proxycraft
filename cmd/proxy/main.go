@@ -41,20 +41,60 @@ type Server struct {
 }
 
 func ServerNew(conn net.Conn) *Server {
-	return &Server{Conn: conn}
+	return &Server{Conn: conn, Clients: make(map[uint32]net.Conn)}
 }
 
 // TODO: add checks for no duplicate ids
-func (s *Server) ServerAddClient(conn net.Conn) {
-	// id := s.NextClientID.Add(1)
+// WARNING: inital data max size should only be PACKET_SIZE_DATA
+func (s *Server) AddClient(conn net.Conn, rawData []byte) bool {
+	id := s.NextClientID.Add(1)
+	_, ok := s.Clients[id]
+	if ok {
+		log.Println("id conflict on server")
+		return false
+	}
+	s.Clients[id] = conn
 
+	packet := packets.Create(consts.FLAG_CONNECTION_INCOMING, id, rawData)
+	_, err := s.Conn.Write(packet)
+	if err != nil {
+		log.Println("failed write to server", err)
+		return false
+	}
+
+	return true
+}
+
+// TODO: handle disconnections
+func ClientRun(id uint32, client net.Conn, dest net.Conn) {
+	// client --> server
+	log.Println(id, "running")
+	buf := make([]byte, consts.PACKET_SIZE_RAW)
+
+	for {
+		n, err := client.Read(buf)
+		if err != nil {
+			log.Println(id, "error from reading form client", err)
+			break
+		}
+
+		packet := packets.Create(consts.FLAG_DATA, id, buf[:n])
+		_, err = dest.Write(packet)
+		if err != nil {
+			log.Println(id, "error when writing to server", err)
+			break
+		}
+	}
+
+	log.Println(id, "ended connection")
+	client.Close()
 }
 
 // Blocking, should be called in gorountinue
 // starts servers runtime (anyalizes packets coming in and out)
 func ServerRun(serv *Server) {
 	log.Println("starting server runtime", serv.Ip)
-	buf := make([]byte, consts.PACKET_SIZE)
+	buf := make([]byte, consts.PACKET_SIZE_SIGNED)
 	for {
 		n, err := serv.Conn.Read(buf)
 		if err != nil {
@@ -64,6 +104,8 @@ func ServerRun(serv *Server) {
 
 		flag, id, data := packets.Read(n, buf)
 		// log.Println(flag, id, data)
+		log.Println(buf[:n])
+		log.Println(data)
 		switch flag {
 		case consts.FLAG_DATA:
 			conn, ok := serv.Clients[id]
@@ -76,6 +118,17 @@ func ServerRun(serv *Server) {
 			if err != nil {
 				log.Println("invalid connection should remove")
 			}
+		case consts.FLAG_CONNECTION_ACCEPTED:
+			log.Println(id, "connect has been accepted")
+			conn, ok := serv.Clients[id]
+			if !ok {
+				packet := packets.Create(consts.FLAG_FAIL, id, []byte("failed to create client"))
+				serv.Conn.Write(packet)
+				conn.Close()
+				break
+			}
+
+			go ClientRun(id, conn, serv.Conn)
 		default:
 			log.Println("not implemented flag")
 		}
@@ -146,14 +199,19 @@ func HandleServerCreation(flag uint8, client net.Conn) {
 	go ServerRun(serv)
 
 	msg := []byte("ip created: " + ip)
-	client.Write(append([]byte{consts.FLAG_SUCCESS}, msg...))
+	packet := packets.Create(consts.FLAG_SUCCESS, 0, msg)
+	client.Write(packet)
 
 	log.Println("registered and now stored connection", clientIP, ip)
 }
 
 func HandleConnection(client net.Conn) {
 	clientIP := client.RemoteAddr().String()
-	buf := make([]byte, consts.PACKET_SIZE)
+
+	// this is because it is are only unregistered packet
+	// so we need to make room for header
+	// also only header packet will contain no data (so no overflow)
+	buf := make([]byte, consts.PACKET_SIZE_RAW)
 
 	log.Println("rounting client", clientIP)
 	n, err := client.Read(buf)
@@ -196,6 +254,11 @@ func HandleConnection(client net.Conn) {
 	}
 	log.Println(dest)
 
+	if !dest.AddClient(client, buf[:n]) {
+		log.Println("FAILED TO ADD CLIENT TO SERVER")
+		client.Close()
+	}
+
 	// start the initalization of the client
 	// aka: creating on the loaders side a valid connection or returning an already exisiting on
 	// this is done through the user ids
@@ -219,7 +282,6 @@ func HandleConnection(client net.Conn) {
 			client[id].Write(packet)}
 	*/
 
-	client.Close()
 }
 
 func main() {
