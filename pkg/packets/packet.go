@@ -20,7 +20,7 @@ func Create(flag uint8, id uint32, data []byte) []byte {
 // DOES NOT PROVIDE ANY WARNINGS AND WILL CRASH IF len(PACKET) < 5
 // THIS SHOULD NEVER HAPPEN
 func Read(n int, packet []byte) (uint8, uint32, []byte) {
-	flag, data := packet[0], packet[consts.PACKET_SIZE_HEADER_OFFSET:n]
+	flag, data := packet[0], packet[consts.PACKET_SIZE_HEADER_OFFSET:n+consts.PACKET_SIZE_HEADER_OFFSET]
 	id := binary.LittleEndian.Uint32(packet[1:consts.PACKET_SIZE_HEADER_OFFSET])
 
 	return flag, id, data
