@@ -93,6 +93,9 @@ func HandleClientJoin(conn net.Conn, ip string, payload []byte, n int) {
 	if e != nil {
 		log.Println("conn -> pipe", e)
 	}
+
+	pipe.Close()
+	conn.Close()
 }
 
 func HandleConnection(conn net.Conn) {

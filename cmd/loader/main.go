@@ -10,9 +10,6 @@ import (
 
 const IP_DEST = "127.0.0.1:25566"
 
-// ip = key
-var players map[string]struct{} = make(map[string]struct{})
-
 func NewClient(prox net.Conn, ip string) {
 	dest, e := net.Dial("tcp", IP_DEST)
 	if e != nil {
