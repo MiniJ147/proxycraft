@@ -2,17 +2,16 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"math/rand/v2"
 	"net"
+	"strings"
 	"sync"
-	"sync/atomic"
+	"time"
 
 	"github.com/minij147/proxycraft/pkg/consts"
-	"github.com/minij147/proxycraft/pkg/packets"
 )
-
-var servers sync.Map
 
 const WORD_LEN = 100
 
@@ -26,73 +25,42 @@ var words = []string{
 	"con", "coo", "cop", "cot", "cow", "coy", "cry", "cub", "cue", "cup",
 	"cur", "cut", "dab", "dad", "dam", "day", "den", "dew", "did", "die",
 	"dig", "dim", "din", "dip", "dot", "dry", "dub", "dug", "due", "dye",
-	"ear", "eat", "egg", "ego", "elf", "end", "era", "eve", "eye", "nnn",
+	"ear", "eat", "egg", "ego", "elf", "aid", "ann", "lol", "anf", "ade",
 }
+
+// var m map[string]net.Conn = make(map[string]net.Conn)
+
+// var pipes []net.Conn = make([]net.Conn, 0)
+var servers sync.Map
 
 type Server struct {
-	Ip           string
-	Conn         net.Conn
-	NextClientID atomic.Uint32
-
-	// not sync.map because each users is guranteed to have unique ID
-	// given by the NextClientID.atomic, so threads (clients) will only
-	// affect their given address
-	Clients map[uint32]net.Conn
+	Conn     net.Conn
+	Ip       string
+	IpCustom string
+	PipeChan chan (net.Conn)
 }
 
-func ServerNew(conn net.Conn) *Server {
-	return &Server{Conn: conn}
+func ServerNew(conn net.Conn, ip string) *Server {
+	return &Server{
+		Conn:     conn,
+		Ip:       ip,
+		PipeChan: make(chan net.Conn),
+	}
 }
 
-// TODO: add checks for no duplicate ids
-func (s *Server) ServerAddClient(conn net.Conn) {
-	// id := s.NextClientID.Add(1)
-
-}
-
-// Blocking, should be called in gorountinue
-// starts servers runtime (anyalizes packets coming in and out)
-func ServerRun(serv *Server) {
-	log.Println("starting server runtime", serv.Ip)
-	buf := make([]byte, consts.PACKET_SIZE)
-	for {
-		n, err := serv.Conn.Read(buf)
-		if err != nil {
-			log.Println("error encountered when reading packet", err, serv.Ip)
-			break
-		}
-
-		flag, id, data := packets.Read(n, buf)
-		// log.Println(flag, id, data)
-		switch flag {
-		case consts.FLAG_DATA:
-			conn, ok := serv.Clients[id]
-			if !ok { // idk what I want to do yet here...
-				log.Println("invalid id")
-				break
-			}
-
-			_, err := conn.Write(data)
-			if err != nil {
-				log.Println("invalid connection should remove")
-			}
-		default:
-			log.Println("not implemented flag")
-		}
+func LoadIntoMap(serv *Server) (string, bool) {
+	_, loaded := servers.LoadOrStore(serv.Ip, serv)
+	if loaded {
+		return serv.IpCustom, false
 	}
 
-	//TODO: add deletion and automactic disconnections for clients
-	log.Println("stopping runtime for server")
-}
-
-func generateRandomIp(conn net.Conn) (string, bool) {
-	serv := ServerNew(conn)
 	for range consts.IP_GENERATE_CAP {
 		i, j, k := rand.IntN(WORD_LEN), rand.IntN(WORD_LEN), rand.IntN(WORD_LEN)
 		ip := fmt.Sprintf("%v.%v.%v.minics.dev", words[i], words[j], words[k])
 
 		if _, loaded := servers.LoadOrStore(ip, serv); !loaded {
-			log.Println(serv)
+			log.Println(serv, "added")
+			serv.IpCustom = ip
 			return ip, true
 		}
 	}
@@ -100,143 +68,172 @@ func generateRandomIp(conn net.Conn) (string, bool) {
 	return "", false
 }
 
-/*
-TODO:
-1. Prevent duplicates of same connections
-2. Add polling thread  which will poll connections to keep all alive
-*/
-func HandleServerCreation(flag uint8, client net.Conn) {
-	fail := func() {
-		client.Write([]byte{consts.FLAG_FAIL})
-		client.Close()
-	}
+func RemoveFromMap(serv *Server) {
+	servers.Delete(serv.Ip)
+	servers.Delete(serv.IpCustom)
+}
 
-	clientIP := client.RemoteAddr().String()
-
-	if flag != consts.FLAG_CREATE {
-		log.Println("invalid byte code", clientIP, flag)
-
-		client.Write([]byte("invalid code"))
-		client.Close()
+func HandleLoaderInit(conn net.Conn, ip string) {
+	_, ok := servers.Load(ip)
+	if ok {
+		log.Println("cannot create server already exists")
+		conn.Write([]byte{consts.FLAG_INIT_FAIL})
 		return
 	}
 
-	log.Println("generating ip for", clientIP)
-	ip, ok := generateRandomIp(client)
+	serv := ServerNew(conn, ip)
+
+	log.Println("hosting on", ip)
+
+	// servers.Store(ip, serv)
+	// servers.Store(consts.TEST_IP, serv)
+	ipCustom, ok := LoadIntoMap(serv)
 	if !ok {
-		fail()
+		log.Println("failed to write into map", ipCustom)
+		conn.Write([]byte{consts.FLAG_INIT_FAIL})
 		return
 	}
 
-	servVal, ok := servers.Load(ip)
-	if !ok {
-		fail()
+	msg := []byte(ipCustom)
+	conn.Write(append([]byte{consts.FLAG_INIT_OK}, msg...))
+
+	// polling functions
+	go func() {
+		for {
+			_, err := conn.Write([]byte{consts.FLAG_POLL})
+			if err != nil {
+				log.Println("failed polling should kill connection")
+				break
+			}
+			time.Sleep(5 * time.Second)
+		}
+
+		log.Println("removed", serv.Ip, serv.IpCustom)
+		RemoveFromMap(serv)
+	}()
+
+}
+
+func HandleClientJoin(conn net.Conn, ip string, payload []byte, n int) {
+	if n < consts.IP_SIZE {
+		conn.Close()
 		return
+	}
+
+	url := string(payload[5:consts.IP_SIZE])
+
+	if !strings.Contains(url, ".minics.dev") {
+		url = "127.0.0.1"
+	}
+	log.Println(ip, "-->", url)
+
+	servVal, ok := servers.Load(url)
+	if !ok {
+		log.Println("server does not exists")
+		conn.Close()
+		return
+
 	}
 
 	serv, ok := servVal.(*Server)
 	if !ok {
-		// this should not happen
-		log.Println("WARNING FAILED TRANSLATING TYPE for *Server")
-
-		fail()
+		log.Println("WARNING FAILED TYPECAST THIS SHOULD NOT HAPPEN")
+		conn.Close()
 		return
 	}
 
-	go ServerRun(serv)
+	ipBytes := []byte(ip)
+	_, e := serv.Conn.Write(append([]byte{consts.FLAG_CONN_NEW}, ipBytes...))
+	if e != nil {
+		log.Fatal("failed to write to server")
+		conn.Close()
+		return
+	}
 
-	msg := []byte("ip created: " + ip)
-	client.Write(append([]byte{consts.FLAG_SUCCESS}, msg...))
+	// spin until pipe created
+	log.Println("waiting...")
+	pipe := <-serv.PipeChan
+	log.Println("got pipe...")
 
-	log.Println("registered and now stored connection", clientIP, ip)
+	_, e = pipe.Write(payload)
+	if e != nil {
+		log.Println("failed wirte", e)
+	}
+
+	go func() {
+		_, e := io.Copy(conn, pipe)
+		if e != nil {
+			log.Println("pipe -> conn", e)
+		}
+	}()
+
+	_, e = io.Copy(pipe, conn)
+	if e != nil {
+		log.Println("conn -> pipe", e)
+	}
+
+	pipe.Close()
+	conn.Close()
 }
 
-func HandleConnection(client net.Conn) {
-	clientIP := client.RemoteAddr().String()
+func HandleConnection(conn net.Conn) {
+	ip := strings.Split(conn.RemoteAddr().String(), ":")[0]
+
 	buf := make([]byte, consts.PACKET_SIZE)
-
-	log.Println("rounting client", clientIP)
-	n, err := client.Read(buf)
-	if err != nil || n == 0 {
-		log.Println("client failed to accept incoming backet", err)
-		client.Close()
+	n, e := conn.Read(buf)
+	if e != nil {
+		conn.Close()
+		log.Println("failed to read client buf", e)
 		return
 	}
 
-	log.Println(buf, n, clientIP)
-
-	// creating server (loader connection packet)
-	if n == consts.LOADER_CREATE_PACKET_SIZE {
-		HandleServerCreation(buf[0], client)
+	if n > 1 {
+		// client trying to join minecraft server
+		log.Println("joining minecraft server")
+		HandleClientJoin(conn, ip, buf, n)
 		return
 	}
 
-	// creating user (user connection packet)
-	if n < consts.IP_SIZE {
-		log.Println("client invalid size for ip")
-		client.Close()
-		return
+	switch buf[0] {
+	case consts.FLAG_INIT:
+		log.Println("initlizing server")
+		HandleLoaderInit(conn, ip)
+	case consts.FLAG_CONN_OK:
+		log.Println("found connection")
+		servVal, ok := servers.Load(ip)
+		if !ok {
+			log.Println("failed to find server")
+			return
+		}
+
+		serv, ok := servVal.(*Server)
+		if !ok {
+			log.Println("FAILED TYPECASE IN FLAG CONN OK")
+			return
+		}
+
+		serv.PipeChan <- conn
+	default:
+		log.Println("invalid switch")
 	}
 
-	requestIP := string(buf[5:consts.IP_SIZE])
-
-	destVal, ok := servers.Load(requestIP)
-	if !ok {
-		log.Println("requested ip does not exists", requestIP, clientIP)
-		client.Close()
-		return
-	}
-
-	dest, ok := destVal.(*Server)
-	if !ok {
-		//warning because this should not fail ever
-		log.Println("WARNING: failed to cast connection, SERVER SIDE ERROR")
-		client.Close()
-		return
-	}
-	log.Println(dest)
-
-	// start the initalization of the client
-	// aka: creating on the loaders side a valid connection or returning an already exisiting on
-	// this is done through the user ids
-
-	// TODO: send ip along with it so the loader can check connections and ips and stuff
-	// _, err = dest.Conn.Write([]byte{consts.FLAG_CONNECTION_NEW, 0})
-	// if err != nil {
-	// 	// TODO: depending on error we will have to close the connection
-	// 	log.Println("failed to write connection new packet", err)
-	// 	client.Close()
-	// 	return
-	// }
-
-	// dest won't directly write a response but
-	/*
-		go func(){
-			packet = {FLAG, ID, DATA}
-
-			packet = server.Read()
-			id := packet[1]
-			client[id].Write(packet)}
-	*/
-
-	client.Close()
 }
 
 func main() {
-	log.Println("starting the proxy")
+	log.Println("starting proxy...")
 
-	listener, err := net.Listen("tcp", consts.IP_PROXY)
-	if err != nil {
-		log.Fatal("failed to start listening", err, consts.IP_PROXY)
+	l, e := net.Listen("tcp", consts.IP_PROXY_HOST)
+	if e != nil {
+		log.Fatal("failed to start server on ", consts.IP_PROXY_HOST)
 	}
 
 	for {
-		client, err := listener.Accept()
-		if err != nil {
-			log.Println("failed to accept incoming connection", err)
-			continue
+		c, e := l.Accept()
+		if e != nil {
+			log.Fatal(e)
 		}
+		log.Println(servers)
 
-		go HandleConnection(client)
+		go HandleConnection(c)
 	}
 }

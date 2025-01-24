@@ -1,65 +1,95 @@
 package main
 
 import (
-	"fmt"
 	"io"
 	"log"
 	"net"
-	"time"
+	"os"
 
 	"github.com/minij147/proxycraft/pkg/consts"
-	"github.com/minij147/proxycraft/pkg/packets"
 )
 
-const (
-	//NOTE:
-	// proxy and dest will both be on port 25565 but shared different addresses
-	// I will add custom ip and ports later
+var IP_DEST = "192.168.1.145:25566"
 
-	IP_DEST = "127.0.0.1:25566" // minecraft
+func NewClient(prox net.Conn, ip string) {
 
-	TIMEOUT_PROXY = 30 * time.Second
-	TIMEOUT_DEST  = 30 * time.Second
-)
+	dest, e := net.Dial("tcp", IP_DEST)
+	if e != nil {
+		log.Println("failed to connect to dest", e)
+		return
+	}
+	defer dest.Close()
 
-// TODO: add dynamic changes to ports and ips and pull it out of hard coded constants
-// TODO: add error messages  for client
+	log.Println(ip)
+	pipe, e := net.Dial("tcp", consts.IP_PROXY_CONN)
+	if e != nil {
+		log.Println("failed to create pipe", e)
+		return
+	}
+	defer pipe.Close()
 
-func main() {
-	log.Println("starting the loader...")
-
-	proxy, err := net.DialTimeout("tcp", consts.IP_PROXY, TIMEOUT_PROXY)
-	if err != nil {
-		log.Fatal("failed  to connect  to proxy on", consts.IP_PROXY)
+	_, e = pipe.Write([]byte{consts.FLAG_CONN_OK})
+	if e != nil {
+		log.Println("failed to write throuhgh pipe")
+		return
 	}
 
-	dest, err := net.DialTimeout("tcp", IP_DEST, TIMEOUT_DEST)
-	if err != nil {
-		log.Fatal("failed to connect to dest on ip", IP_DEST)
+	go func() {
+		_, e := io.Copy(dest, pipe)
+		if e != nil {
+			log.Println(e)
+		}
+	}()
+
+	_, e = io.Copy(pipe, dest)
+	if e != nil {
+		log.Println(e)
+	}
+}
+
+func main() {
+	log.Println("starting loader...")
+	if len(os.Args) > 1 {
+		IP_DEST = os.Args[1]
+	}
+
+	p, e := net.Dial("tcp", consts.IP_PROXY_CONN)
+	if e != nil {
+		log.Println("failed to connection", e)
+	}
+
+	_, e = p.Write([]byte{consts.FLAG_INIT})
+	if e != nil {
+		log.Println("failed to write", e)
 	}
 
 	buf := make([]byte, consts.PACKET_SIZE)
 
-	_, err = proxy.Write([]byte{consts.FLAG_CREATE})
-	if err != nil {
-		log.Fatal("failed create packet to proxy", err)
+	n, e := p.Read(buf)
+	if e != nil {
+		log.Fatal("failed to get response")
 	}
 
-	n, err := proxy.Read(buf)
-	if err != nil || n == 0 {
-		log.Fatal("failed to read buffer", err)
+	if buf[0] != consts.FLAG_INIT_OK {
+		log.Fatal("failed to init")
 	}
 
-	if buf[0] == consts.FLAG_FAIL {
-		log.Fatal("failed to create server")
+	log.Println("initlized with server", string(buf[1:n]))
+	log.Println(p.RemoteAddr().String())
+
+	for {
+		n, e := p.Read(buf)
+		if e != nil {
+			log.Fatal("failed to read to buf", e)
+		}
+
+		switch buf[0] {
+		case consts.FLAG_CONN_NEW:
+			go NewClient(p, string(buf[1:n]))
+		case consts.FLAG_POLL:
+			log.Println("polling answer")
+		default:
+			log.Println("unkown flag sent")
+		}
 	}
-
-	log.Println(string(buf[1:n]))
-	proxy.Write(packets.Create(consts.FLAG_DATA, 1, consts.PACKET_EMPTY))
-
-	//NOTE: TEST CODE (only 1 users at a time and disconnects not supported)
-	log.Println(io.Copy(dest, proxy))
-
-	log.Println("Done, press any key to close...")
-	fmt.Scanf("")
 }
