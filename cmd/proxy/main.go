@@ -201,7 +201,7 @@ func HandleConnection(conn net.Conn) {
 	case consts.FLAG_CONN_OK:
 		log.Println("found connection")
 
-		url := string(buf[1:n])
+		url := string(buf[1:n-1])
 		log.Println("finding server witrh url to accept connection", url)
 		servVal, ok := servers.Load(url)
 		if !ok {
