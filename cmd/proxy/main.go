@@ -187,7 +187,7 @@ func HandleConnection(conn net.Conn) {
 		return
 	}
 
-	if n > 1 {
+	if n > consts.IP_SIZE+2 {
 		// client trying to join minecraft server
 		log.Println("joining minecraft server")
 		HandleClientJoin(conn, ip, buf, n)
@@ -200,7 +200,10 @@ func HandleConnection(conn net.Conn) {
 		HandleLoaderInit(conn, ip)
 	case consts.FLAG_CONN_OK:
 		log.Println("found connection")
-		servVal, ok := servers.Load(ip)
+
+		url := string(buf[1:n])
+		log.Println("finding server witrh url to accept connection", url)
+		servVal, ok := servers.Load(url)
 		if !ok {
 			log.Println("failed to find server")
 			return

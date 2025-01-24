@@ -2,7 +2,8 @@ package consts
 
 const (
 	IP_PROXY_HOST   = ":25565"
-	IP_PROXY_CONN   = "proxy.minics.dev:25565"
+	// IP_PROXY_CONN   = "proxy.minics.dev:26850"
+    IP_PROXY_CONN = "127.0.0.1:25565"
 	IP_SIZE         = 27
 	IP_GENERATE_CAP = 20
 

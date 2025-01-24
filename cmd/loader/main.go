@@ -10,6 +10,7 @@ import (
 )
 
 var IP_DEST = "192.168.1.145:25566"
+var URL = ""
 
 func NewClient(prox net.Conn, ip string) {
 
@@ -28,7 +29,8 @@ func NewClient(prox net.Conn, ip string) {
 	}
 	defer pipe.Close()
 
-	_, e = pipe.Write([]byte{consts.FLAG_CONN_OK})
+	msg := []byte(URL)
+	_, e = pipe.Write(append([]byte{consts.FLAG_CONN_OK}, msg...))
 	if e != nil {
 		log.Println("failed to write throuhgh pipe")
 		return
@@ -74,7 +76,8 @@ func main() {
 		log.Fatal("failed to init")
 	}
 
-	log.Println("initlized with server", string(buf[1:n]))
+	URL = string(buf[1:n])
+	log.Println("initlized with server", URL)
 	log.Println(p.RemoteAddr().String())
 
 	for {
