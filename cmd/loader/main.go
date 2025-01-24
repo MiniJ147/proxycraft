@@ -8,7 +8,7 @@ import (
 	"github.com/minij147/proxycraft/pkg/consts"
 )
 
-const IP_DEST = "127.0.0.1:25566"
+const IP_DEST = "192.168.1.145:25566"
 
 func NewClient(prox net.Conn, ip string) {
 	dest, e := net.Dial("tcp", IP_DEST)
