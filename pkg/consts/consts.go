@@ -1,7 +1,8 @@
 package consts
 
 const (
-	IP_PROXY        = "127.0.0.1:25565"
+	IP_PROXY_HOST   = "127.0.0.1:25565"
+	IP_PROXY_CONN   = "proxy.minics.dev:25565"
 	IP_SIZE         = 27
 	IP_GENERATE_CAP = 20
 
@@ -15,4 +16,5 @@ const (
 	FLAG_CONN_NEW  uint8 = 10
 	FLAG_CONN_OK   uint8 = 11
 	FLAG_CONN_FAIL uint8 = 12
+	FLAG_POLL      uint8 = 20
 )

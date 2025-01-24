@@ -8,7 +8,7 @@ import (
 	"net"
 	"strings"
 	"sync"
-	"sync/atomic"
+	"time"
 
 	"github.com/minij147/proxycraft/pkg/consts"
 )
@@ -38,8 +38,6 @@ type Server struct {
 	Ip       string
 	IpCustom string
 	PipeChan chan (net.Conn)
-	PipeHead atomic.Int32
-	PipeTail atomic.Int32
 }
 
 func ServerNew(conn net.Conn, ip string) *Server {
@@ -70,6 +68,11 @@ func LoadIntoMap(serv *Server) (string, bool) {
 	return "", false
 }
 
+func RemoveFromMap(serv *Server) {
+	servers.Delete(serv.Ip)
+	servers.Delete(serv.IpCustom)
+}
+
 func HandleLoaderInit(conn net.Conn, ip string) {
 	_, ok := servers.Load(ip)
 	if ok {
@@ -93,6 +96,21 @@ func HandleLoaderInit(conn net.Conn, ip string) {
 
 	msg := []byte(ipCustom)
 	conn.Write(append([]byte{consts.FLAG_INIT_OK}, msg...))
+
+	// polling functions
+	go func() {
+		for {
+			_, err := conn.Write([]byte{consts.FLAG_POLL})
+			if err != nil {
+				log.Println("failed polling should kill connection")
+				break
+			}
+			time.Sleep(5 * time.Second)
+		}
+
+		log.Println("removed", serv.Ip, serv.IpCustom)
+		RemoveFromMap(serv)
+	}()
 
 }
 
@@ -204,9 +222,9 @@ func HandleConnection(conn net.Conn) {
 func main() {
 	log.Println("starting proxy...")
 
-	l, e := net.Listen("tcp", consts.IP_PROXY)
+	l, e := net.Listen("tcp", consts.IP_PROXY_HOST)
 	if e != nil {
-		log.Fatal("failed to start server on ", consts.IP_PROXY)
+		log.Fatal("failed to start server on ", consts.IP_PROXY_HOST)
 	}
 
 	for {
