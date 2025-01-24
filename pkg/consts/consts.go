@@ -7,7 +7,7 @@ const (
 
 	PACKET_SIZE = 1024
 
-	TEST_IP = "abc.def.ghi.minics.dev"
+	TEST_IP = "aaa.bbb.ccc.minics.dev"
 
 	FLAG_INIT      uint8 = 1
 	FLAG_INIT_OK   uint8 = 2

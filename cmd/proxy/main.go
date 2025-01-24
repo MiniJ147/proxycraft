@@ -1,11 +1,14 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"log"
+	"math/rand/v2"
 	"net"
 	"strings"
-	"time"
+	"sync"
+	"sync/atomic"
 
 	"github.com/minij147/proxycraft/pkg/consts"
 )
@@ -25,22 +28,72 @@ var words = []string{
 	"ear", "eat", "egg", "ego", "elf", "aid", "ann", "lol", "anf", "ade",
 }
 
-var m map[string]net.Conn = make(map[string]net.Conn)
-var pipes []net.Conn = make([]net.Conn, 0)
+// var m map[string]net.Conn = make(map[string]net.Conn)
+
+// var pipes []net.Conn = make([]net.Conn, 0)
+var servers sync.Map
+
+type Server struct {
+	Conn     net.Conn
+	Ip       string
+	IpCustom string
+	PipeChan chan (net.Conn)
+	PipeHead atomic.Int32
+	PipeTail atomic.Int32
+}
+
+func ServerNew(conn net.Conn, ip string) *Server {
+	return &Server{
+		Conn:     conn,
+		Ip:       ip,
+		PipeChan: make(chan net.Conn),
+	}
+}
+
+func LoadIntoMap(serv *Server) (string, bool) {
+	_, loaded := servers.LoadOrStore(serv.Ip, serv)
+	if loaded {
+		return serv.IpCustom, false
+	}
+
+	for range consts.IP_GENERATE_CAP {
+		i, j, k := rand.IntN(WORD_LEN), rand.IntN(WORD_LEN), rand.IntN(WORD_LEN)
+		ip := fmt.Sprintf("%v.%v.%v.minics.dev", words[i], words[j], words[k])
+
+		if _, loaded := servers.LoadOrStore(ip, serv); !loaded {
+			log.Println(serv, "added")
+			serv.IpCustom = ip
+			return ip, true
+		}
+	}
+
+	return "", false
+}
 
 func HandleLoaderInit(conn net.Conn, ip string) {
-	_, ok := m[ip]
+	_, ok := servers.Load(ip)
 	if ok {
 		log.Println("cannot create server already exists")
 		conn.Write([]byte{consts.FLAG_INIT_FAIL})
 		return
 	}
 
-	m[ip] = conn
-	m[consts.TEST_IP] = conn
+	serv := ServerNew(conn, ip)
 
-	msg := []byte(consts.TEST_IP)
+	log.Println("hosting on", ip)
+
+	// servers.Store(ip, serv)
+	// servers.Store(consts.TEST_IP, serv)
+	ipCustom, ok := LoadIntoMap(serv)
+	if !ok {
+		log.Println("failed to write into map", ipCustom)
+		conn.Write([]byte{consts.FLAG_INIT_FAIL})
+		return
+	}
+
+	msg := []byte(ipCustom)
 	conn.Write(append([]byte{consts.FLAG_INIT_OK}, msg...))
+
 }
 
 func HandleClientJoin(conn net.Conn, ip string, payload []byte, n int) {
@@ -50,17 +103,29 @@ func HandleClientJoin(conn net.Conn, ip string, payload []byte, n int) {
 	}
 
 	url := string(payload[5:consts.IP_SIZE])
+
+	if !strings.Contains(url, ".minics.dev") {
+		url = "127.0.0.1"
+	}
 	log.Println(ip, "-->", url)
 
-	serv, ok := m[url]
+	servVal, ok := servers.Load(url)
 	if !ok {
 		log.Println("server does not exists")
+		conn.Close()
+		return
+
+	}
+
+	serv, ok := servVal.(*Server)
+	if !ok {
+		log.Println("WARNING FAILED TYPECAST THIS SHOULD NOT HAPPEN")
 		conn.Close()
 		return
 	}
 
 	ipBytes := []byte(ip)
-	_, e := serv.Write(append([]byte{consts.FLAG_CONN_NEW}, ipBytes...))
+	_, e := serv.Conn.Write(append([]byte{consts.FLAG_CONN_NEW}, ipBytes...))
 	if e != nil {
 		log.Fatal("failed to write to server")
 		conn.Close()
@@ -69,13 +134,8 @@ func HandleClientJoin(conn net.Conn, ip string, payload []byte, n int) {
 
 	// spin until pipe created
 	log.Println("waiting...")
-	for len(pipes) == 0 {
-		time.Sleep(500 * time.Millisecond)
-	}
+	pipe := <-serv.PipeChan
 	log.Println("got pipe...")
-
-	pipe := pipes[0]
-	pipes = pipes[1:]
 
 	_, e = pipe.Write(payload)
 	if e != nil {
@@ -122,10 +182,21 @@ func HandleConnection(conn net.Conn) {
 		HandleLoaderInit(conn, ip)
 	case consts.FLAG_CONN_OK:
 		log.Println("found connection")
-		pipes = append(pipes, conn)
+		servVal, ok := servers.Load(ip)
+		if !ok {
+			log.Println("failed to find server")
+			return
+		}
+
+		serv, ok := servVal.(*Server)
+		if !ok {
+			log.Println("FAILED TYPECASE IN FLAG CONN OK")
+			return
+		}
+
+		serv.PipeChan <- conn
 	default:
 		log.Println("invalid switch")
-		break
 	}
 
 }
@@ -143,7 +214,7 @@ func main() {
 		if e != nil {
 			log.Fatal(e)
 		}
-		log.Println(m)
+		log.Println(servers)
 
 		go HandleConnection(c)
 	}
