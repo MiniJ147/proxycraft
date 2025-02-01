@@ -203,7 +203,15 @@ func HandleConnection(conn net.Conn) {
 	case consts.FLAG_CONN_OK:
 		log.Println("found connection")
 
-		url := string(buf[1 : n-1])
+		// NOTE: this used to be buf[1:n-1] becuase I saw a extra byte get floated in one time
+		// but now it seems to cause the v to be trimed off.
+		// Whats weird is that this old code currently works in production
+		// And we are sending this from the loader so we sholdnt have any malformations
+		// maybe it was the \0 but the only reason it mattered was because it was effecting the search in the map
+		// idk but testing will need to be done later
+		// NOTE: p2, just checked and it actually isn't working in production, so the fix will be made and we will see what happens
+		url := string(buf[1:n])
+
 		log.Println("finding server witrh url to accept connection", url)
 		servVal, ok := servers.Load(url)
 		if !ok {
