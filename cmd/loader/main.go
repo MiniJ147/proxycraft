@@ -15,6 +15,7 @@ import (
 //TODO: add debug mode
 
 const PROXY_URL = "https://proxycraft.minics.dev/config"
+
 // const PROXY_URL = "http://localhost:3002/config"
 
 var IP_DEST = ":25565"

@@ -18,8 +18,13 @@ const (
 	// IP_PROXY_CONFIG_HOST = ":3000"
 	// IP_PROXY_CONN        = "proxy.minics.dev:26850"
 	// IP_PROXY_CONN   = "127.0.0.1:25565"
-	IP_SIZE         = 27
+
+	// size of ip for our minecraft packet
+	IP_CLIENT_SIZE  = 27
 	IP_GENERATE_CAP = 20
+
+    // length of generated ips len(xxx.xxx.xxx.minics.dev)
+    IP_LEN = 22 
 
 	PACKET_SIZE = 1024
 
