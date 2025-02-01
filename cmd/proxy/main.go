@@ -1,242 +1,53 @@
 package main
 
 import (
-	"fmt"
-	"io"
 	"log"
-	"math/rand/v2"
-	"net"
-	"strings"
-	"sync"
+	"os"
 	"time"
 
+	"github.com/minij147/proxycraft/internal/proxy/services"
 	"github.com/minij147/proxycraft/pkg/consts"
 )
 
-const WORD_LEN = 100
+/*
+Proxy.go
 
-var words = []string{
-	"ace", "act", "add", "ado", "aft", "age", "ago", "aid", "air", "ale",
-	"all", "and", "ant", "any", "ape", "apt", "arc", "arm", "art", "ash",
-	"ask", "ate", "aub", "awe", "axe", "bad", "bag", "ban", "bar", "bat",
-	"bay", "bed", "bee", "beg", "bet", "bib", "big", "bin", "bit", "bog",
-	"boo", "bow", "box", "boy", "bud", "bug", "bun", "bus", "but", "buy",
-	"cab", "cad", "cam", "can", "cap", "car", "cat", "cay", "cod", "cog",
-	"con", "coo", "cop", "cot", "cow", "coy", "cry", "cub", "cue", "cup",
-	"cur", "cut", "dab", "dad", "dam", "day", "den", "dew", "did", "die",
-	"dig", "dim", "din", "dip", "dot", "dry", "dub", "dug", "due", "dye",
-	"ear", "eat", "egg", "ego", "elf", "aid", "ann", "lol", "anf", "ade",
-}
+Proxy.go is to run the proxy which allows for loaders and clients to connect and communicate with port forwarding.
 
-// var m map[string]net.Conn = make(map[string]net.Conn)
+Runs the proxy server were the main logic is contained here and runs a http server for config details for clients.
 
-// var pipes []net.Conn = make([]net.Conn, 0)
-var servers sync.Map
+When running proxy you must provide the following arguments (in the order as appeared)
 
-type Server struct {
-	Conn     net.Conn
-	Ip       string
-	IpCustom string
-	PipeChan chan (net.Conn)
-}
+{connection ip} - This will be the domain name or whatever you set for the loaders to connect too
+{connection port} - This will be the port used to reach the proxy from the outside (xxx.minics.dev:{connection-port})
+{proxy host port} - This will be the port the tcp server will listen on
+{config host port} - This will be the port for the http config server will listen on
+*/
 
-func ServerNew(conn net.Conn, ip string) *Server {
-	return &Server{
-		Conn:     conn,
-		Ip:       ip,
-		PipeChan: make(chan net.Conn),
-	}
-}
-
-func LoadIntoMap(serv *Server) (string, bool) {
-	_, loaded := servers.LoadOrStore(serv.Ip, serv)
-	if loaded {
-		return serv.IpCustom, false
-	}
-
-	for range consts.IP_GENERATE_CAP {
-		i, j, k := rand.IntN(WORD_LEN), rand.IntN(WORD_LEN), rand.IntN(WORD_LEN)
-		ip := fmt.Sprintf("%v.%v.%v.minics.dev", words[i], words[j], words[k])
-
-		if _, loaded := servers.LoadOrStore(ip, serv); !loaded {
-			log.Println(serv, "added")
-			serv.IpCustom = ip
-			return ip, true
-		}
-	}
-
-	return "", false
-}
-
-func RemoveFromMap(serv *Server) {
-	servers.Delete(serv.Ip)
-	servers.Delete(serv.IpCustom)
-}
-
-func HandleLoaderInit(conn net.Conn, ip string) {
-	_, ok := servers.Load(ip)
-	if ok {
-		log.Println("cannot create server already exists")
-		conn.Write([]byte{consts.FLAG_INIT_FAIL})
-		return
-	}
-
-	serv := ServerNew(conn, ip)
-
-	log.Println("hosting on", ip)
-
-	// servers.Store(ip, serv)
-	// servers.Store(consts.TEST_IP, serv)
-	ipCustom, ok := LoadIntoMap(serv)
-	if !ok {
-		log.Println("failed to write into map", ipCustom)
-		conn.Write([]byte{consts.FLAG_INIT_FAIL})
-		return
-	}
-
-	msg := []byte(ipCustom)
-	conn.Write(append([]byte{consts.FLAG_INIT_OK}, msg...))
-
-	// polling functions
-	go func() {
-		for {
-			_, err := conn.Write([]byte{consts.FLAG_POLL})
-			if err != nil {
-				log.Println("failed polling should kill connection")
-				break
-			}
-			time.Sleep(5 * time.Second)
-		}
-
-		log.Println("removed", serv.Ip, serv.IpCustom)
-		RemoveFromMap(serv)
-	}()
-
-}
-
-func HandleClientJoin(conn net.Conn, ip string, payload []byte, n int) {
-	if n < consts.IP_SIZE {
-		conn.Close()
-		return
-	}
-
-	url := string(payload[5:consts.IP_SIZE])
-
-	if !strings.Contains(url, ".minics.dev") {
-		url = "127.0.0.1"
-	}
-	log.Println(ip, "-->", url)
-
-	servVal, ok := servers.Load(url)
-	if !ok {
-		log.Println("server does not exists")
-		conn.Close()
-		return
-
-	}
-
-	serv, ok := servVal.(*Server)
-	if !ok {
-		log.Println("WARNING FAILED TYPECAST THIS SHOULD NOT HAPPEN")
-		conn.Close()
-		return
-	}
-
-	ipBytes := []byte(ip)
-	_, e := serv.Conn.Write(append([]byte{consts.FLAG_CONN_NEW}, ipBytes...))
-	if e != nil {
-		log.Fatal("failed to write to server")
-		conn.Close()
-		return
-	}
-
-	// spin until pipe created
-	log.Println("waiting...")
-	pipe := <-serv.PipeChan
-	log.Println("got pipe...")
-
-	_, e = pipe.Write(payload)
-	if e != nil {
-		log.Println("failed wirte", e)
-	}
-
-	go func() {
-		_, e := io.Copy(conn, pipe)
-		if e != nil {
-			log.Println("pipe -> conn", e)
-		}
-	}()
-
-	_, e = io.Copy(pipe, conn)
-	if e != nil {
-		log.Println("conn -> pipe", e)
-	}
-
-	pipe.Close()
-	conn.Close()
-}
-
-func HandleConnection(conn net.Conn) {
-	ip := strings.Split(conn.RemoteAddr().String(), ":")[0]
-
-	buf := make([]byte, consts.PACKET_SIZE)
-	n, e := conn.Read(buf)
-	if e != nil {
-		conn.Close()
-		log.Println("failed to read client buf", e)
-		return
-	}
-
-	if n > consts.IP_SIZE+2 {
-		// client trying to join minecraft server
-		log.Println("joining minecraft server")
-		HandleClientJoin(conn, ip, buf, n)
-		return
-	}
-
-	switch buf[0] {
-	case consts.FLAG_INIT:
-		log.Println("initlizing server")
-		HandleLoaderInit(conn, ip)
-	case consts.FLAG_CONN_OK:
-		log.Println("found connection")
-
-		url := string(buf[1:n-1])
-		log.Println("finding server witrh url to accept connection", url)
-		servVal, ok := servers.Load(url)
-		if !ok {
-			log.Println("failed to find server")
-			return
-		}
-
-		serv, ok := servVal.(*Server)
-		if !ok {
-			log.Println("FAILED TYPECASE IN FLAG CONN OK")
-			return
-		}
-
-		serv.PipeChan <- conn
-	default:
-		log.Println("invalid switch")
-	}
-
-}
+const ARGS_SIZE = 4
 
 func main() {
-	log.Println("starting proxy...")
-
-	l, e := net.Listen("tcp", consts.IP_PROXY_HOST)
-	if e != nil {
-		log.Fatal("failed to start server on ", consts.IP_PROXY_HOST)
+	log.Println(os.Args)
+	if len(os.Args) < ARGS_SIZE+1 {
+		log.Fatal("not enough arguments passed in, please provide the following:\n{connection-ip} {connection port} {proxy host port} {config host port}\nSee docs for more info")
 	}
 
-	for {
-		c, e := l.Accept()
-		if e != nil {
-			log.Fatal(e)
-		}
-		log.Println(servers)
+	connectionIP := os.Args[1]
+	connectionPort := os.Args[2]
+	proxyIp := ":" + os.Args[3]
+	configIp := ":" + os.Args[4]
 
-		go HandleConnection(c)
+	cfg := consts.ServerConfig{
+		ProxyIP:             connectionIP,
+		ProxyPort:           connectionPort,
+		ServerVersion:       consts.VERSION_SERVER,
+		LatestClientVersion: consts.VERSION_CLIENT,
+		LastDeployedDate:    time.Now().Format("2006-01-02 15:04:05"),
 	}
+
+	log.Println("Starting Proxy on Version", consts.VERSION_SERVER)
+	log.Printf("\nINFO:\nConnection Ip: %v\nConnection Port: %v\nProxy Host: %v\nConfig Host: %v\n\n", connectionIP, connectionPort, proxyIp, configIp)
+	services.ConfigRun(configIp, cfg)
+
+	services.ProxyRun(proxyIp)
 }
