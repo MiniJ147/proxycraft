@@ -117,12 +117,12 @@ func HandleLoaderInit(conn net.Conn, ip string) {
 }
 
 func HandleClientJoin(conn net.Conn, ip string, payload []byte, n int) {
-	if n < consts.IP_SIZE {
+	if n < consts.IP_CLIENT_SIZE {
 		conn.Close()
 		return
 	}
 
-	url := string(payload[5:consts.IP_SIZE])
+	url := string(payload[5:consts.IP_CLIENT_SIZE])
 
 	if !strings.Contains(url, ".minics.dev") {
 		url = "127.0.0.1"
@@ -189,7 +189,7 @@ func HandleConnection(conn net.Conn) {
 		return
 	}
 
-	if n > consts.IP_SIZE+2 {
+	if n > consts.IP_CLIENT_SIZE+2 {
 		// client trying to join minecraft server
 		log.Println("joining minecraft server")
 		HandleClientJoin(conn, ip, buf, n)
@@ -210,7 +210,7 @@ func HandleConnection(conn net.Conn) {
 		// maybe it was the \0 but the only reason it mattered was because it was effecting the search in the map
 		// idk but testing will need to be done later
 		// NOTE: p2, just checked and it actually isn't working in production, so the fix will be made and we will see what happens
-		url := string(buf[1:n])
+		url := string(buf[1:min(n, 1+consts.IP_LEN)])
 
 		log.Println("finding server witrh url to accept connection", url)
 		servVal, ok := servers.Load(url)

@@ -24,6 +24,22 @@ When running proxy you must provide the following arguments (in the order as app
 {config host port} - This will be the port for the http config server will listen on
 */
 
+/*
+TODO: simplfy connectionIP, we can remove that because it will be given from the config server.
+Meaning it does not matter what actual value it is, since nobody will be using it.
+
+TODO: maybe change connections to be proxycraft.xxx.xxx.minics.dev instead of xxx.xxx.xxx.minics.dev.
+This will lockdown the domains to just proxycraft.*. We should add more words to make up for the lost of the third variable
+
+TODO: fix up proxy server logs so it can be more readable and potiential add functionality to configure it
+
+TODO: clean up loader responses for when it gets initalized much like the INFO log in the proxy
+*/
+
+/*
+feature idea could be to add passwords to ips
+*/
+
 const ARGS_SIZE = 4
 
 func main() {
