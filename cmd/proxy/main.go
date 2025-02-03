@@ -22,6 +22,8 @@ When running proxy you must provide the following arguments (in the order as app
 {connection port} - This will be the port used to reach the proxy from the outside (xxx.minics.dev:{connection-port})
 {proxy host port} - This will be the port the tcp server will listen on
 {config host port} - This will be the port for the http config server will listen on
+
+[optional] - d = debug mode
 */
 
 /*
@@ -43,9 +45,12 @@ feature idea could be to add passwords to ips
 const ARGS_SIZE = 4
 
 func main() {
-	log.Println(os.Args)
 	if len(os.Args) < ARGS_SIZE+1 {
 		log.Fatal("not enough arguments passed in, please provide the following:\n{connection-ip} {connection port} {proxy host port} {config host port}\nSee docs for more info")
+	}
+	debug := len(os.Args) == ARGS_SIZE+2 && os.Args[5] == "-d"
+	if debug {
+		log.Println("WARNING: RUNNING IN DEBUG MODE\n")
 	}
 
 	connectionIP := os.Args[1]
@@ -65,5 +70,5 @@ func main() {
 	log.Printf("\nINFO:\nConnection Ip: %v\nConnection Port: %v\nProxy Host: %v\nConfig Host: %v\n\n", connectionIP, connectionPort, proxyIp, configIp)
 	services.ConfigRun(configIp, cfg)
 
-	services.ProxyRun(proxyIp)
+	services.ProxyRun(debug, proxyIp)
 }

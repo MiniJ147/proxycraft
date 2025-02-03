@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 
 	"github.com/minij147/proxycraft/pkg/consts"
@@ -14,9 +15,11 @@ import (
 
 //TODO: add debug mode
 
-const PROXY_URL = "https://proxycraft.minics.dev/config"
+var PROXY_URL = "https://proxycraft.minics.dev/config"
 
-// const PROXY_URL = "http://localhost:3002/config"
+// const PROXY_URL = "https://proxycraft.minics.dev/config"
+
+const DEBUG_PROXY_URL = "http://localhost:3002/config"
 
 var IP_DEST = ":25565"
 var IP_PROXY_CONN = ""
@@ -99,6 +102,11 @@ func getPort() string {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "-d" {
+		log.Println("WARNING DEBUG MODE ACTIVED. ROUTING PACKETS TO", DEBUG_PROXY_URL)
+		PROXY_URL = DEBUG_PROXY_URL
+	}
+
 	log.Println("starting loader...")
 	cfg := FetchConfig()
 

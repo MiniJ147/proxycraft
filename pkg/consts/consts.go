@@ -23,12 +23,10 @@ const (
 	IP_CLIENT_SIZE  = 27
 	IP_GENERATE_CAP = 20
 
-    // length of generated ips len(xxx.xxx.xxx.minics.dev)
-    IP_LEN = 22 
+	// length of generated ips len(xxx.xxx.xxx.minics.dev)
+	IP_LEN = 22
 
 	PACKET_SIZE = 1024
-
-	TEST_IP = "aaa.bbb.ccc.minics.dev"
 
 	FLAG_INIT      uint8 = 1
 	FLAG_INIT_OK   uint8 = 2
@@ -39,4 +37,6 @@ const (
 	FLAG_POLL      uint8 = 20
 
 	POLL_FREQUENCY = 30 * time.Second
+
+	DEBUG_DOMAIN = "deb.ugx.xxx.minics.dev"
 )
