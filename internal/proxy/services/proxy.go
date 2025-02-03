@@ -32,7 +32,7 @@ var words = []string{
 
 const DEBUG_WORD_LEN = 3
 
-var debugWords = []string{"xxx", "yyy", "zzz"}
+var debugWords = []string{"yyy", "xxx", "zzz"}
 
 // var m map[string]net.Conn = make(map[string]net.Conn)
 
@@ -223,7 +223,7 @@ func HandleConnection(conn net.Conn) {
 		return
 	}
 
-	if n > 2 {
+	if n > consts.IP_CLIENT_SIZE+2 {
 		// client trying to join minecraft server
 		log.Println("joining minecraft server")
 		HandleClientJoin(conn, ip, buf, n)
@@ -237,8 +237,8 @@ func HandleConnection(conn net.Conn) {
 	case consts.FLAG_CONN_OK:
 		log.Println("found connection")
 
-        // this is due to linux sending extra bytes on there loaders
-        // so its best to only look up to the max length of a custom ip
+		// this is due to linux sending extra bytes on there loaders
+		// so its best to only look up to the max length of a custom ip
 		url := string(buf[1:min(n, 1+consts.IP_LEN)])
 
 		log.Println("finding server witrh url to accept connection", url)
